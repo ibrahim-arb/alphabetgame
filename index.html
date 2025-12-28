@@ -271,4 +271,608 @@
 
 <!-- QUICK SETUP SHEET -->
 <div id="overlaySetup" class="overlay">
+  <div class="sheet">
+    <div class="row" style="justify-content:space-between;">
+      <h2>Quick setup</h2>
+      <button class="btn small ghost" id="btnCloseSetup">Close</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Players block (separated for clarity) -->
+    <div class="col">
+      <label class="strong">Players</label>
+      <div class="row">
+        <button class="btn small" id="btnPlayersMinus">-</button>
+        <div class="pill" id="playersCountPill" style="min-width:70px; justify-content:center;">4</div>
+        <button class="btn small" id="btnPlayersPlus">+</button>
+      </div>
+    </div>
+
+    <div class="space"></div>
+
+    <!-- Seconds block (separated for clarity) -->
+    <div class="col">
+      <label class="strong">Seconds per turn</label>
+      <div class="row">
+        <button class="btn small" data-time="3">3s</button>
+        <button class="btn small primary" data-time="5">5s</button>
+        <button class="btn small" data-time="7">7s</button>
+        <button class="btn small" data-time="10">10s</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="col" id="namesContainer"></div>
+
+    <div class="divider"></div>
+
+    <button class="btn primary wide" id="btnBegin">Begin</button>
+    <div class="space"></div>
+    <div class="tiny">Defaults apply (clockwise, 3 strikes, random letter, exclude Q/X/Z ON, warning beep ON, vibrate ON).</div>
+  </div>
+</div>
+
+<!-- SETTINGS SHEET -->
+<div id="overlaySettings" class="overlay">
+  <div class="sheet">
+    <div class="row" style="justify-content:space-between;">
+      <h2>Settings</h2>
+      <button class="btn small ghost" id="btnCloseSettings">Close</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="col">
+      <label>Penalty mode</label>
+      <select id="selPenalty">
+        <option value="strikes">Strikes</option>
+        <option value="instantOut">Instant out on timeout</option>
+      </select>
+
+      <label>Max strikes (if Strikes mode)</label>
+      <select id="selMaxStrikes">
+        <option>1</option>
+        <option>2</option>
+        <option selected>3</option>
+        <option>4</option>
+      </select>
+
+      <label>Direction</label>
+      <select id="selDirection">
+        <option value="cw" selected>Clockwise</option>
+        <option value="ccw">Counter-clockwise</option>
+      </select>
+
+      <label>Category</label>
+      <select id="selCategory">
+        <option value="">None</option>
+        <option>Animals</option>
+        <option>Countries</option>
+        <option>Foods</option>
+        <option>Things in a house</option>
+        <option>Sports</option>
+      </select>
+
+      <label>Letter mode</label>
+      <select id="selLetterMode">
+        <option value="random" selected>Random</option>
+        <option value="manual">Manual pick</option>
+        <option value="az">Cycle A to Z</option>
+      </select>
+
+      <div id="manualLetterWrap" style="display:none;">
+        <label>Manual letter</label>
+        <select id="selManualLetter"></select>
+      </div>
+
+      <div class="toggleRow">
+        <div class="left">
+          <div style="font-weight:650;">Exclude Q, X, Z</div>
+          <div class="desc">Kid-friendly letter pool</div>
+        </div>
+        <div class="switch on" id="swExcludeHard"></div>
+      </div>
+
+      <div class="toggleRow">
+        <div class="left">
+          <div style="font-weight:650;">Warning beep at 3s</div>
+          <div class="desc">Short beep before timeout</div>
+        </div>
+        <div class="switch on" id="swBeep"></div>
+      </div>
+
+      <div class="toggleRow">
+        <div class="left">
+          <div style="font-weight:650;">Vibrate on timeout</div>
+          <div class="desc">If device supports it</div>
+        </div>
+        <div class="switch on" id="swVibrate"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="grid2">
+        <button class="btn ghost" id="btnResetScores">Reset strikes</button>
+        <button class="btn danger" id="btnResetAll">Reset everything</button>
+      </div>
+
+      <div class="space"></div>
+      <div class="tiny">Settings are saved on this device.</div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW TO PLAY -->
+<div id="overlayHow" class="overlay">
+  <div class="sheet">
+    <div class="row" style="justify-content:space-between;">
+      <h2>How to play</h2>
+      <button class="btn small ghost" id="btnCloseHow">Close</button>
+    </div>
+    <div class="divider"></div>
+    <p>Each round has a letter (and optionally a category). Players take turns clockwise. On your turn, say a valid word starting with the letter (and matching the category if used) before the timer hits 0.</p>
+    <p>Repeats are honor system: if nobody catches it, it counts.</p>
+    <p>Timeout gives a strike (default 3 strikes) or instant out, depending on Settings.</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  const defaultSettings = {
+    secondsPerTurn: 5,
+    penaltyMode: "strikes",
+    maxStrikes: 3,
+    direction: "cw",
+    category: "",
+    letterMode: "random",
+    manualLetter: "A",
+    excludeHard: true,
+    warnBeep: true,
+    vibrate: true
+  };
+
+  const storeKey = "alphabetGameTimer_v1";
+  const state = {
+    screen: "home",
+    players: [],
+    activePlayers: [],
+    currentIdxInActive: 0,
+    round: 1,
+    letter: "A",
+    azCursor: 0,
+    running: false,
+    remaining: 5,
+    tickHandle: null,
+    settings: { ...defaultSettings },
+    statusMsg: ""
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+  function save() {
+    const payload = {
+      settings: state.settings,
+      players: state.players.map(p => p.name)
+    };
+    localStorage.setItem(storeKey, JSON.stringify(payload));
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.settings) state.settings = { ...defaultSettings, ...parsed.settings };
+      if (Array.isArray(parsed.players) && parsed.players.length) {
+        state.players = parsed.players.map((name, i) => ({
+          id: i,
+          name: name || `Player ${i+1}`,
+          strikes: 0,
+          out: false
+        }));
+      }
+    } catch (e) {}
+  }
+
+  function setScreen(name) {
+    state.screen = name;
+    $("screenHome").classList.toggle("active", name === "home");
+    $("screenPlay").classList.toggle("active", name === "play");
+    updateHomeSummary();
+  }
+
+  function updateHomeSummary() {
+    const s = state.settings;
+    const playersCount = state.players.length || 4;
+    const cat = s.category ? `Category: ${s.category}` : "Category: None";
+    const pen = s.penaltyMode === "strikes" ? `${s.maxStrikes} strikes` : "Instant out";
+    $("homeSummary").textContent = `${playersCount} players • ${s.secondsPerTurn}s • ${cat} • ${pen}`;
+  }
+
+  function letterPool() {
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    if (!state.settings.excludeHard) return letters;
+    return letters.filter(ch => !["Q","X","Z"].includes(ch));
+  }
+
+  function pickLetter() {
+    const mode = state.settings.letterMode;
+    const pool = letterPool();
+    if (mode === "manual") return state.settings.manualLetter || "A";
+
+    if (mode === "az") {
+      for (let tries = 0; tries < 26; tries++) {
+        const ch = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[state.azCursor % 26];
+        state.azCursor = (state.azCursor + 1) % 26;
+        if (pool.includes(ch)) return ch;
+      }
+      return "A";
+    }
+    return pool[Math.floor(Math.random() * pool.length)] || "A";
+  }
+
+  function rebuildActivePlayers() {
+    state.activePlayers = state.players
+      .map((p, idx) => ({ p, idx }))
+      .filter(x => !x.p.out)
+      .map(x => x.idx);
+
+    if (state.activePlayers.length === 0) {
+      state.players.forEach(p => { p.out = false; p.strikes = 0; });
+      state.activePlayers = state.players.map((_, i) => i);
+    }
+
+    state.currentIdxInActive = clamp(state.currentIdxInActive, 0, state.activePlayers.length - 1);
+  }
+
+  function currentPlayerIndex() {
+    if (!state.activePlayers.length) return 0;
+    return state.activePlayers[state.currentIdxInActive];
+  }
+
+  function currentPlayer() {
+    return state.players[currentPlayerIndex()];
+  }
+
+  function resetTimer() {
+    state.remaining = state.settings.secondsPerTurn;
+    $("timerText").textContent = String(state.remaining).padStart(2,"0");
+    $("timerText").classList.toggle("warn", false);
+    state.running = true;
+    startTick();
+  }
+
+  function stopTick() {
+    state.running = false;
+    if (state.tickHandle) clearInterval(state.tickHandle);
+    state.tickHandle = null;
+  }
+
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.value = 0.08;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      setTimeout(() => { osc.stop(); ctx.close(); }, 90);
+    } catch (e) {}
+  }
+
+  function vibrate(ms) {
+    if (!state.settings.vibrate) return;
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  function nextTurn() {
+    if (!state.activePlayers.length) rebuildActivePlayers();
+    const dir = state.settings.direction;
+    const step = (dir === "cw") ? 1 : -1;
+    const n = state.activePlayers.length;
+
+    state.currentIdxInActive = (state.currentIdxInActive + step + n) % n;
+
+    if ((dir === "cw" && state.currentIdxInActive === 0) ||
+        (dir === "ccw" && state.currentIdxInActive === n - 1)) {
+      state.round += 1;
+    }
+
+    resetTimer();
+    renderPlay();
+  }
+
+  function onTimeout() {
+    const p = currentPlayer();
+    const mode = state.settings.penaltyMode;
+
+    if (mode === "instantOut") {
+      p.out = true;
+      p.strikes = state.settings.maxStrikes;
+    } else {
+      p.strikes += 1;
+      if (p.strikes >= state.settings.maxStrikes) p.out = true;
+    }
+
+    rebuildActivePlayers();
+    state.statusMsg = `${p.name} timed out`;
+    vibrate(220);
+    nextTurn();
+  }
+
+  function startTick() {
+    stopTick();
+    state.running = true;
+    state.tickHandle = setInterval(() => {
+      if (!state.running) return;
+
+      state.remaining -= 1;
+
+      if (state.remaining <= 3 && state.remaining > 0) {
+        $("timerText").classList.toggle("warn", true);
+        if (state.settings.warnBeep && state.remaining === 3) beep();
+      } else {
+        $("timerText").classList.toggle("warn", false);
+      }
+
+      $("timerText").textContent = String(Math.max(0, state.remaining)).padStart(2,"0");
+
+      if (state.remaining <= 0) {
+        stopTick();
+        onTimeout();
+      }
+    }, 1000);
+  }
+
+  function renderStrikes(p) {
+    const bar = $("strikeBar");
+    bar.innerHTML = "";
+    const max = state.settings.maxStrikes;
+
+    for (let i = 0; i < max; i++) {
+      const chip = document.createElement("div");
+      chip.className = "strikeChip";
+      chip.textContent = (i < p.strikes) ? "Strike" : "Empty";
+      bar.appendChild(chip);
+    }
+
+    if (p.out) {
+      const outChip = document.createElement("div");
+      outChip.className = "strikeChip out";
+      outChip.textContent = "OUT";
+      bar.appendChild(outChip);
+    }
+  }
+
+  function renderPlay() {
+    const p = currentPlayer();
+    $("letterBig").textContent = state.letter;
+    $("categoryLine").textContent = `Category: ${state.settings.category || "None"}`;
+    $("playerName").textContent = p.name;
+    $("roundPill").textContent = `Round ${state.round}`;
+    $("statusLine").textContent = state.statusMsg ? state.statusMsg : "";
+    renderStrikes(p);
+    $("timerText").textContent = String(state.remaining).padStart(2,"0");
+  }
+
+  function openOverlay(el) { el.classList.add("active"); }
+  function closeOverlay(el) { el.classList.remove("active"); }
+
+  function escapeHtml(s) {
+    return String(s).r      color: var(--text);
+      cursor: pointer;
+      user-select: none;
+      touch-action: manipulation;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: var(--accent); color: #001018; }
+    .btn.danger { background: var(--danger); color: #fff; }
+    .btn.ok { background: var(--ok); color: #00110a; }
+    .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.14); }
+    @media (prefers-color-scheme: light) {
+      .btn.ghost { border: 1px solid rgba(0,0,0,.12); }
+    }
+    .btn.small { padding: 10px 12px; font-size: 14px; border-radius: 14px; }
+    .btn.wide { width: 100%; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill.flash {
+      color: var(--text);
+      background: rgba(93,214,255,.18);
+      outline: 2px solid rgba(93,214,255,.28);
+      transition: background .15s ease, outline .15s ease;
+    }
+    @media (prefers-color-scheme: light) {
+      .pill.flash {
+        background: rgba(0,119,255,.14);
+        outline: 2px solid rgba(0,119,255,.20);
+      }
+    }
+
+    .divider { height: 1px; background: rgba(255,255,255,.10); margin: 12px 0; }
+    @media (prefers-color-scheme: light) {
+      .divider { background: rgba(0,0,0,.10); }
+    }
+
+    /* Screens */
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* Play UI */
+    .letter {
+      font-size: 64px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      line-height: 1;
+    }
+    .category {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .playerName {
+      font-size: 28px;
+      font-weight: 800;
+      margin: 10px 0 6px;
+    }
+    .timer {
+      font-size: 56px;
+      font-weight: 900;
+      letter-spacing: .5px;
+      margin: 10px 0 10px;
+    }
+    .timer.warn { color: var(--danger); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+    /* Modal */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 14px;
+      z-index: 20;
+    }
+    .overlay.active { display: flex; }
+    .sheet {
+      width: min(720px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: var(--panel);
+      border-radius: 22px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.45);
+      padding: 14px;
+    }
+
+    label { font-size: 13px; color: var(--muted); }
+    label.strong { font-weight: 650; color: var(--text); opacity: .9; }
+
+    input[type="text"], select {
+      width: 100%;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      outline: none;
+      font-size: 15px;
+    }
+    @media (prefers-color-scheme: light) {
+      input[type="text"], select {
+        border: 1px solid rgba(0,0,0,.12);
+        background: rgba(0,0,0,.03);
+      }
+    }
+    .toggleRow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 10px 0; }
+    .toggleRow .left { display:flex; flex-direction:column; gap:4px; }
+    .toggleRow .desc { font-size: 12px; color: var(--muted); }
+    .switch {
+      width: 46px; height: 28px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      position: relative;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    .switch::after {
+      content:"";
+      width: 22px; height: 22px;
+      position: absolute;
+      top: 3px; left: 3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .18s ease;
+    }
+    .switch.on { background: var(--accent); }
+    .switch.on::after { transform: translateX(18px); }
+    .tiny { font-size: 12px; color: var(--muted); }
+    .strikeBar { display:flex; gap:8px; flex-wrap:wrap; margin-top: 6px; }
+    .strikeChip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .strikeChip.out { background: rgba(255,93,122,.18); color: var(--text); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HOME -->
+  <div id="screenHome" class="screen active">
+    <div class="card">
+      <h1>Alphabet Game Timer</h1>
+      <p>Fast start, honor system for repeats. Settings are optional.</p>
+      <div class="space"></div>
+      <button class="btn primary wide" id="btnStart">Start Game</button>
+      <div class="space"></div>
+      <div class="grid2">
+        <button class="btn ghost" id="btnSettingsFromHome">Settings</button>
+        <button class="btn ghost" id="btnHow">How to Play</button>
+      </div>
+      <div class="space"></div>
+      <div class="pill" id="homeSummary"></div>
+    </div>
+  </div>
+
+  <!-- PLAY -->
+  <div id="screenPlay" class="screen">
+    <div class="card">
+      <div class="row" style="justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div class="letter" id="letterBig">A</div>
+          <div class="category" id="categoryLine">Category: None</div>
+        </div>
+        <div class="col" style="align-items:flex-end;">
+          <div class="pill" id="roundPill">Round 1</div>
+          <button class="btn small ghost" id="btnOpenSettings">Settings</button>
+        </div>
+      </div>
+
+      <div class="playerName" id="playerName">Player 1</div>
+      <div class="strikeBar" id="strikeBar"></div>
+
+      <div class="timer" id="timerText">05</div>
+
+      <div class="grid2">
+        <button class="btn ok wide" id="btnDone">Done</button>
+        <button class="btn wide" id="btnPause">Pause</button>
+      </div>
+
+      <div class="space"></div>
+      <div class="grid3">
+        <button class="btn ghost" id="btnNewLetter">New Letter</button>
+        <button class="btn ghost" id="btnNext">Next</button>
+        <button class="btn danger" id="btnEnd">End</button>
+      </div>
+
+      <div class="space"></div>
+      <div class="tiny" id="statusLine"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- QUICK SETUP SHEET -->
+<div id="overlaySetup" class="overlay">
   <div class="sheet
