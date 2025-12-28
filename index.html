@@ -665,214 +665,271 @@
   function closeOverlay(el) { el.classList.remove("active"); }
 
   function escapeHtml(s) {
-    return String(s).r      color: var(--text);
-      cursor: pointer;
-      user-select: none;
-      touch-action: manipulation;
-    }
-    .btn:active { transform: translateY(1px); }
-    .btn.primary { background: var(--accent); color: #001018; }
-    .btn.danger { background: var(--danger); color: #fff; }
-    .btn.ok { background: var(--ok); color: #00110a; }
-    .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.14); }
-    @media (prefers-color-scheme: light) {
-      .btn.ghost { border: 1px solid rgba(0,0,0,.12); }
-    }
-    .btn.small { padding: 10px 12px; font-size: 14px; border-radius: 14px; }
-    .btn.wide { width: 100%; }
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    })[c]);
+  }
 
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.08);
-      color: var(--muted);
-      font-size: 13px;
+  function buildNamesEditor(count) {
+    const wrap = $("namesContainer");
+    wrap.innerHTML = "";
+    for (let i = 0; i < count; i++) {
+      const name = (state.players[i] && state.players[i].name) ? state.players[i].name : `Player ${i+1}`;
+      const block = document.createElement("div");
+      block.className = "col";
+      block.innerHTML = `
+        <label>Player ${i+1} name</label>
+        <input type="text" id="name_${i}" value="${escapeHtml(name)}" />
+      `;
+      wrap.appendChild(block);
     }
-    .pill.flash {
-      color: var(--text);
-      background: rgba(93,214,255,.18);
-      outline: 2px solid rgba(93,214,255,.28);
-      transition: background .15s ease, outline .15s ease;
-    }
-    @media (prefers-color-scheme: light) {
-      .pill.flash {
-        background: rgba(0,119,255,.14);
-        outline: 2px solid rgba(0,119,255,.20);
-      }
+  }
+
+  function initPlayers(count) {
+    const names = [];
+    for (let i = 0; i < count; i++) {
+      const el = $(`name_${i}`);
+      names.push(el ? el.value.trim() : `Player ${i+1}`);
     }
 
-    .divider { height: 1px; background: rgba(255,255,255,.10); margin: 12px 0; }
-    @media (prefers-color-scheme: light) {
-      .divider { background: rgba(0,0,0,.10); }
+    state.players = names.map((name, i) => ({
+      id: i,
+      name: name || `Player ${i+1}`,
+      strikes: 0,
+      out: false
+    }));
+
+    rebuildActivePlayers();
+    save();
+  }
+
+  function startGame() {
+    state.round = 1;
+    state.statusMsg = "";
+    state.letter = pickLetter();
+    rebuildActivePlayers();
+    state.currentIdxInActive = 0;
+    state.remaining = state.settings.secondsPerTurn;
+
+    setScreen("play");
+    resetTimer();
+    renderPlay();
+  }
+
+  function buildManualLetters() {
+    const sel = $("selManualLetter");
+    sel.innerHTML = "";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(ch => {
+      const opt = document.createElement("option");
+      opt.value = ch;
+      opt.textContent = ch;
+      sel.appendChild(opt);
+    });
+  }
+
+  function syncSettingsUI() {
+    $("selPenalty").value = state.settings.penaltyMode;
+    $("selMaxStrikes").value = String(state.settings.maxStrikes);
+    $("selDirection").value = state.settings.direction;
+    $("selCategory").value = state.settings.category || "";
+    $("selLetterMode").value = state.settings.letterMode;
+
+    $("swExcludeHard").classList.toggle("on", !!state.settings.excludeHard);
+    $("swBeep").classList.toggle("on", !!state.settings.warnBeep);
+    $("swVibrate").classList.toggle("on", !!state.settings.vibrate);
+
+    const manualWrap = $("manualLetterWrap");
+    manualWrap.style.display = (state.settings.letterMode === "manual") ? "block" : "none";
+    $("selManualLetter").value = state.settings.manualLetter || "A";
+  }
+
+  function applySettingsFromUI() {
+    state.settings.penaltyMode = $("selPenalty").value;
+    state.settings.maxStrikes = parseInt($("selMaxStrikes").value, 10) || 3;
+    state.settings.direction = $("selDirection").value;
+    state.settings.category = $("selCategory").value;
+    state.settings.letterMode = $("selLetterMode").value;
+    state.settings.manualLetter = $("selManualLetter").value;
+
+    save();
+    updateHomeSummary();
+    renderPlay();
+  }
+
+  function flashPlayersPill() {
+    const el = $("playersCountPill");
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 220);
+  }
+
+  // Init
+  load();
+  if (!state.players.length) {
+    state.players = Array.from({ length: 4 }, (_, i) => ({
+      id: i, name: `Player ${i+1}`, strikes: 0, out: false
+    }));
+  }
+  rebuildActivePlayers();
+  buildManualLetters();
+  updateHomeSummary();
+  setScreen("home");
+
+  // Home buttons
+  $("btnStart").addEventListener("click", () => {
+    const count = state.players.length || 4;
+    $("playersCountPill").textContent = String(count);
+    buildNamesEditor(count);
+
+    const buttons = $("overlaySetup").querySelectorAll("button[data-time]");
+    buttons.forEach(b => b.classList.toggle("primary", parseInt(b.dataset.time,10) === state.settings.secondsPerTurn));
+
+    openOverlay($("overlaySetup"));
+  });
+
+  $("btnSettingsFromHome").addEventListener("click", () => {
+    syncSettingsUI();
+    openOverlay($("overlaySettings"));
+  });
+
+  $("btnHow").addEventListener("click", () => openOverlay($("overlayHow")));
+
+  // Setup overlay controls
+  $("btnCloseSetup").addEventListener("click", () => closeOverlay($("overlaySetup")));
+
+  $("btnPlayersMinus").addEventListener("click", () => {
+    const n = clamp(parseInt($("playersCountPill").textContent,10) - 1, 2, 10);
+    $("playersCountPill").textContent = String(n);
+    flashPlayersPill();
+    buildNamesEditor(n);
+  });
+
+  $("btnPlayersPlus").addEventListener("click", () => {
+    const n = clamp(parseInt($("playersCountPill").textContent,10) + 1, 2, 10);
+    $("playersCountPill").textContent = String(n);
+    flashPlayersPill();
+    buildNamesEditor(n);
+  });
+
+  $("overlaySetup").addEventListener("click", (e) => {
+    if (e.target.matches("button[data-time]")) {
+      const t = parseInt(e.target.dataset.time, 10);
+      state.settings.secondsPerTurn = t;
+      save();
+
+      const buttons = $("overlaySetup").querySelectorAll("button[data-time]");
+      buttons.forEach(b => b.classList.toggle("primary", parseInt(b.dataset.time,10) === t));
+
+      updateHomeSummary();
     }
+  });
 
-    /* Screens */
-    .screen { display: none; }
-    .screen.active { display: block; }
+  $("btnBegin").addEventListener("click", () => {
+    const count = parseInt($("playersCountPill").textContent,10) || 4;
+    initPlayers(count);
+    closeOverlay($("overlaySetup"));
+    startGame();
+  });
 
-    /* Play UI */
-    .letter {
-      font-size: 64px;
-      font-weight: 900;
-      letter-spacing: 2px;
-      line-height: 1;
+  // Settings overlay
+  $("btnCloseSettings").addEventListener("click", () => closeOverlay($("overlaySettings")));
+  $("selPenalty").addEventListener("change", () => { applySettingsFromUI(); });
+  $("selMaxStrikes").addEventListener("change", () => { applySettingsFromUI(); rebuildActivePlayers(); renderPlay(); });
+  $("selDirection").addEventListener("change", () => { applySettingsFromUI(); });
+  $("selCategory").addEventListener("change", () => { applySettingsFromUI(); });
+  $("selLetterMode").addEventListener("change", () => { applySettingsFromUI(); syncSettingsUI(); });
+  $("selManualLetter").addEventListener("change", () => { applySettingsFromUI(); });
+
+  $("swExcludeHard").addEventListener("click", () => {
+    state.settings.excludeHard = !state.settings.excludeHard;
+    save();
+    syncSettingsUI();
+  });
+  $("swBeep").addEventListener("click", () => {
+    state.settings.warnBeep = !state.settings.warnBeep;
+    save();
+    syncSettingsUI();
+  });
+  $("swVibrate").addEventListener("click", () => {
+    state.settings.vibrate = !state.settings.vibrate;
+    save();
+    syncSettingsUI();
+  });
+
+  $("btnResetScores").addEventListener("click", () => {
+    state.players.forEach(p => { p.strikes = 0; p.out = false; });
+    rebuildActivePlayers();
+    save();
+    renderPlay();
+  });
+
+  $("btnResetAll").addEventListener("click", () => {
+    localStorage.removeItem(storeKey);
+    state.settings = { ...defaultSettings };
+    state.players = Array.from({ length: 4 }, (_, i) => ({
+      id: i, name: `Player ${i+1}`, strikes: 0, out: false
+    }));
+    rebuildActivePlayers();
+    save();
+    syncSettingsUI();
+    updateHomeSummary();
+    setScreen("home");
+    closeOverlay($("overlaySettings"));
+  });
+
+  // How overlay
+  $("btnCloseHow").addEventListener("click", () => closeOverlay($("overlayHow")));
+
+  // Play controls
+  $("btnOpenSettings").addEventListener("click", () => {
+    syncSettingsUI();
+    openOverlay($("overlaySettings"));
+  });
+
+  $("btnDone").addEventListener("click", () => {
+    state.statusMsg = "";
+    nextTurn();
+  });
+
+  $("btnNext").addEventListener("click", () => {
+    state.statusMsg = "";
+    nextTurn();
+  });
+
+  $("btnPause").addEventListener("click", () => {
+    if (state.running) {
+      stopTick();
+      $("btnPause").textContent = "Resume";
+      state.statusMsg = "Paused";
+    } else {
+      state.statusMsg = "";
+      resetTimer();
+      $("btnPause").textContent = "Pause";
     }
-    .category {
-      font-size: 14px;
-      color: var(--muted);
-      margin-top: 6px;
-    }
-    .playerName {
-      font-size: 28px;
-      font-weight: 800;
-      margin: 10px 0 6px;
-    }
-    .timer {
-      font-size: 56px;
-      font-weight: 900;
-      letter-spacing: .5px;
-      margin: 10px 0 10px;
-    }
-    .timer.warn { color: var(--danger); }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    renderPlay();
+  });
 
-    /* Modal */
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.55);
-      display: none;
-      align-items: flex-end;
-      justify-content: center;
-      padding: 14px;
-      z-index: 20;
-    }
-    .overlay.active { display: flex; }
-    .sheet {
-      width: min(720px, 100%);
-      max-height: 85vh;
-      overflow: auto;
-      background: var(--panel);
-      border-radius: 22px;
-      box-shadow: 0 18px 50px rgba(0,0,0,.45);
-      padding: 14px;
-    }
+  $("btnNewLetter").addEventListener("click", () => {
+    state.letter = pickLetter();
+    state.statusMsg = "New letter";
+    state.round = 1;
+    resetTimer();
+    renderPlay();
+  });
 
-    label { font-size: 13px; color: var(--muted); }
-    label.strong { font-weight: 650; color: var(--text); opacity: .9; }
+  $("btnEnd").addEventListener("click", () => {
+    stopTick();
+    setScreen("home");
+  });
 
-    input[type="text"], select {
-      width: 100%;
-      padding: 12px 12px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,.14);
-      background: rgba(255,255,255,.06);
-      color: var(--text);
-      outline: none;
-      font-size: 15px;
-    }
-    @media (prefers-color-scheme: light) {
-      input[type="text"], select {
-        border: 1px solid rgba(0,0,0,.12);
-        background: rgba(0,0,0,.03);
-      }
-    }
-    .toggleRow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 10px 0; }
-    .toggleRow .left { display:flex; flex-direction:column; gap:4px; }
-    .toggleRow .desc { font-size: 12px; color: var(--muted); }
-    .switch {
-      width: 46px; height: 28px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.14);
-      position: relative;
-      cursor: pointer;
-      flex: 0 0 auto;
-    }
-    .switch::after {
-      content:"";
-      width: 22px; height: 22px;
-      position: absolute;
-      top: 3px; left: 3px;
-      border-radius: 50%;
-      background: #fff;
-      transition: transform .18s ease;
-    }
-    .switch.on { background: var(--accent); }
-    .switch.on::after { transform: translateX(18px); }
-    .tiny { font-size: 12px; color: var(--muted); }
-    .strikeBar { display:flex; gap:8px; flex-wrap:wrap; margin-top: 6px; }
-    .strikeChip {
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.08);
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .strikeChip.out { background: rgba(255,93,122,.18); color: var(--text); }
-  </style>
-</head>
-<body>
-<div class="wrap">
-
-  <!-- HOME -->
-  <div id="screenHome" class="screen active">
-    <div class="card">
-      <h1>Alphabet Game Timer</h1>
-      <p>Fast start, honor system for repeats. Settings are optional.</p>
-      <div class="space"></div>
-      <button class="btn primary wide" id="btnStart">Start Game</button>
-      <div class="space"></div>
-      <div class="grid2">
-        <button class="btn ghost" id="btnSettingsFromHome">Settings</button>
-        <button class="btn ghost" id="btnHow">How to Play</button>
-      </div>
-      <div class="space"></div>
-      <div class="pill" id="homeSummary"></div>
-    </div>
-  </div>
-
-  <!-- PLAY -->
-  <div id="screenPlay" class="screen">
-    <div class="card">
-      <div class="row" style="justify-content:space-between; align-items:flex-start;">
-        <div>
-          <div class="letter" id="letterBig">A</div>
-          <div class="category" id="categoryLine">Category: None</div>
-        </div>
-        <div class="col" style="align-items:flex-end;">
-          <div class="pill" id="roundPill">Round 1</div>
-          <button class="btn small ghost" id="btnOpenSettings">Settings</button>
-        </div>
-      </div>
-
-      <div class="playerName" id="playerName">Player 1</div>
-      <div class="strikeBar" id="strikeBar"></div>
-
-      <div class="timer" id="timerText">05</div>
-
-      <div class="grid2">
-        <button class="btn ok wide" id="btnDone">Done</button>
-        <button class="btn wide" id="btnPause">Pause</button>
-      </div>
-
-      <div class="space"></div>
-      <div class="grid3">
-        <button class="btn ghost" id="btnNewLetter">New Letter</button>
-        <button class="btn ghost" id="btnNext">Next</button>
-        <button class="btn danger" id="btnEnd">End</button>
-      </div>
-
-      <div class="space"></div>
-      <div class="tiny" id="statusLine"></div>
-    </div>
-  </div>
-
-</div>
-
-<!-- QUICK SETUP SHEET -->
-<div id="overlaySetup" class="overlay">
-  <div class="sheet
+  // Close overlays when tapping outside sheet
+  ["overlaySetup","overlaySettings","overlayHow"].forEach(id => {
+    const ov = $(id);
+    ov.addEventListener("click", (e) => {
+      if (e.target === ov) closeOverlay(ov);
+    });
+  });
+})();
+</script>
+</body>
+</html>
